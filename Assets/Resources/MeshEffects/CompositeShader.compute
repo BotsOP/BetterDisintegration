@@ -1,0 +1,22 @@
+#pragma kernel CompositeEffects
+
+RWByteAddressBuffer gpuVertices;
+ByteAddressBuffer gpuIndices;
+
+StructuredBuffer<float> input1;
+
+int amountVerts;
+int vertexStride;
+float time;
+float effectDuration;
+
+[numthreads(128,1,1)]
+void CompositeEffects (uint3 id : SV_DispatchThreadID)
+{
+	if(id.x > (uint)amountVerts)
+	{
+		return;
+	}
+	float value = input1[id.x];
+	gpuVertices.Store(id.x * vertexStride, asuint(value));
+}

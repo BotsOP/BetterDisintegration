@@ -1,0 +1,258 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel FindAdjacentTriangles
+#pragma kernel DiscoverMesh
+#pragma kernel DecayMesh
+
+struct AdjacentTriangles
+{
+    int tri1TriangleIndex;
+    int tri2TriangleIndex;
+    int tri3TriangleIndex;
+};
+
+RWByteAddressBuffer gpuVertices;
+ByteAddressBuffer gpuIndices;
+RWStructuredBuffer<AdjacentTriangles> gpuAdjacentTriangle;
+StructuredBuffer<AdjacentTriangles> gpuAdjacentTriangleRead;
+RWStructuredBuffer<int> gpuAdjacentTrianglesIndex;
+StructuredBuffer<int> gpuTrianglesShouldCheck;
+AppendStructuredBuffer<int> gpuTrianglesShouldCheckAppend;
+RWStructuredBuffer<int> gpuAmountTrianglesToCheck;
+RWStructuredBuffer<float> output;
+
+int amountTriangles;
+int amountTrianglesToCheck;
+int amountTrianglesToColor;
+int amountVerts;
+int triangleIndexToColor;
+int vertexStride;
+int indexStride;
+float decaySpeed;
+bool reverseDirection;
+
+bool EqualVector3(float3 a[3], float3 b)
+{
+    float minDist = 0.00001;
+    
+    if(abs(a[0].x - b.x) < minDist && abs(a[0].y - b.y) < minDist && abs(a[0].z - b.z) < minDist)
+    {
+        return true;
+    }
+    if(abs(a[1].x - b.x) < minDist && abs(a[1].y - b.y) < minDist && abs(a[1].z - b.z) < minDist)
+    {
+        return true;
+    }
+    if(abs(a[2].x - b.x) < minDist && abs(a[2].y - b.y) < minDist && abs(a[2].z - b.z) < minDist)
+    {
+        return true;
+    }
+    return false;
+}
+
+[numthreads(128,1,1)]
+void FindAdjacentTriangles (uint3 id : SV_DispatchThreadID)
+{
+    if(id.x > (uint)amountTriangles)
+    {
+        return;
+    }
+    uint index1 = gpuIndices.Load((id.x * 3) * indexStride);
+    uint index2 = gpuIndices.Load((id.x * 3 + 1) * indexStride);
+    uint index3 = gpuIndices.Load((id.x * 3 + 2) * indexStride);
+    
+    float3 vertex1 = asfloat(gpuVertices.Load3(index1 * vertexStride));
+    float3 vertex2 = asfloat(gpuVertices.Load3(index2 * vertexStride));
+    float3 vertex3 = asfloat(gpuVertices.Load3(index3 * vertexStride));
+    
+    float3 allPos[3];
+    allPos[0] = vertex1;
+    allPos[1] = vertex2;
+    allPos[2] = vertex3;
+
+    float3 newVertex1;
+    float3 newVertex2;
+    float3 newVertex3;
+
+    uint newIndex1;
+    uint newIndex2;
+    uint newIndex3;
+
+    int adjacentTrianglesFound[3] = {-1, -1, -1};
+    int amountTrianglesFound = 0;
+
+    for (int i = 0; i < amountTriangles; i++)
+    {
+        newIndex1 = gpuIndices.Load((i * 3) * indexStride);
+        newIndex2 = gpuIndices.Load((i * 3 + 1) * indexStride);
+        newIndex3 = gpuIndices.Load((i * 3 + 2) * indexStride);
+
+        if((uint)i == id.x)
+        {
+            continue;
+        }
+
+        newVertex1 = asfloat(gpuVertices.Load3(newIndex1 * vertexStride));
+        newVertex2 = asfloat(gpuVertices.Load3(newIndex2 * vertexStride));
+        newVertex3 = asfloat(gpuVertices.Load3(newIndex3 * vertexStride));
+        
+        int amountMatchingVertexFound = 0;
+        if(EqualVector3(allPos, newVertex1))
+        {
+            amountMatchingVertexFound++;
+        }
+        if(EqualVector3(allPos, newVertex2))
+        {
+            amountMatchingVertexFound++;
+        }
+        if(EqualVector3(allPos, newVertex3))
+        {
+            amountMatchingVertexFound++;
+        }
+
+        if(amountMatchingVertexFound >= 2)
+        {
+            adjacentTrianglesFound[amountTrianglesFound] = i;
+            amountTrianglesFound++;
+        }
+    }
+
+    gpuAdjacentTriangle[id.x].tri1TriangleIndex = adjacentTrianglesFound[0];
+    gpuAdjacentTriangle[id.x].tri2TriangleIndex = adjacentTrianglesFound[1];
+    gpuAdjacentTriangle[id.x].tri3TriangleIndex = adjacentTrianglesFound[2];
+}
+
+bool CheckAdjacentTrianglesAllChecked(int adjacentTrianlge)
+{
+    float adjacentAdjacent1UVArray[9];
+    uint adjacentAdjacentTriangle1 = abs(gpuAdjacentTriangleRead[adjacentTrianlge].tri1TriangleIndex);
+    uint adjacentAdjacentTriangle2 = abs(gpuAdjacentTriangleRead[adjacentTrianlge].tri2TriangleIndex);
+    uint adjacentAdjacentTriangle3 = abs(gpuAdjacentTriangleRead[adjacentTrianlge].tri3TriangleIndex);
+    
+    uint adjacent1Index1 = gpuIndices.Load(adjacentAdjacentTriangle1 * 3 * indexStride);
+    uint adjacent1Index2 = gpuIndices.Load((adjacentAdjacentTriangle1 * 3 + 1) * indexStride);
+    uint adjacent1Index3 = gpuIndices.Load((adjacentAdjacentTriangle1 * 3 + 2) * indexStride);
+    adjacentAdjacent1UVArray[0] = output[adjacent1Index1];
+    adjacentAdjacent1UVArray[1] = output[adjacent1Index2];
+    adjacentAdjacent1UVArray[2] = output[adjacent1Index3];
+
+    uint adjacent2Index1 = gpuIndices.Load(adjacentAdjacentTriangle2 * 3 * indexStride);
+    uint adjacent2Index2 = gpuIndices.Load((adjacentAdjacentTriangle2 * 3 + 1) * indexStride);
+    uint adjacent2Index3 = gpuIndices.Load((adjacentAdjacentTriangle2 * 3 + 2) * indexStride);
+    adjacentAdjacent1UVArray[3] = output[adjacent2Index1];
+    adjacentAdjacent1UVArray[4] = output[adjacent2Index2];
+    adjacentAdjacent1UVArray[5] = output[adjacent2Index3];
+
+    uint adjacent3Index1 = gpuIndices.Load(adjacentAdjacentTriangle3 * 3 * indexStride);
+    uint adjacent3Index2 = gpuIndices.Load((adjacentAdjacentTriangle3 * 3 + 1) * indexStride);
+    uint adjacent3Index3 = gpuIndices.Load((adjacentAdjacentTriangle3 * 3 + 2) * indexStride);
+    adjacentAdjacent1UVArray[6] = output[adjacent3Index1];
+    adjacentAdjacent1UVArray[7] = output[adjacent3Index2];
+    adjacentAdjacent1UVArray[8] = output[adjacent3Index3];
+    
+    if(adjacentAdjacent1UVArray[0] >= 1 && adjacentAdjacent1UVArray[1] >= 1 && adjacentAdjacent1UVArray[2] >= 1 &&
+        adjacentAdjacent1UVArray[3] >= 1 && adjacentAdjacent1UVArray[4] >= 1 && adjacentAdjacent1UVArray[5] >= 1 &&
+        adjacentAdjacent1UVArray[6] >= 1 && adjacentAdjacent1UVArray[7] >= 1 && adjacentAdjacent1UVArray[8] >= 1)
+    {
+        return true;
+    }
+    return false;
+}
+
+void CheckAdjacentTriangleShouldDiscover(int adjacentTrianlge)
+{
+    int adjacentTriangleAbs = abs(adjacentTrianlge);
+    if(!reverseDirection && gpuAdjacentTrianglesIndex[adjacentTriangleAbs] >= 0 || reverseDirection && gpuAdjacentTrianglesIndex[adjacentTriangleAbs] < 0)
+    {
+        int value;
+        
+        float adjacentUVArray[3];
+        uint index1 = gpuIndices.Load((adjacentTriangleAbs * 3) * indexStride);
+        uint index2 = gpuIndices.Load((adjacentTriangleAbs * 3 + 1) * indexStride);
+        uint index3 = gpuIndices.Load((adjacentTriangleAbs * 3 + 2) * indexStride);
+        adjacentUVArray[0] = output[index1];
+        adjacentUVArray[1] = output[index2];
+        adjacentUVArray[2] = output[index3];
+        
+        if(adjacentUVArray[0] >= 1 && adjacentUVArray[1] >= 1 && adjacentUVArray[2] >= 1 )
+        {
+            if(CheckAdjacentTrianglesAllChecked(adjacentTrianlge))
+            {
+                if(reverseDirection)
+                {
+                    InterlockedExchange(gpuAdjacentTrianglesIndex[adjacentTriangleAbs], 1, value);
+                    return;
+                }
+                InterlockedExchange(gpuAdjacentTrianglesIndex[adjacentTriangleAbs], -1, value);
+                return;
+            }
+        }
+        gpuTrianglesShouldCheckAppend.Append(adjacentTriangleAbs);
+        InterlockedAdd(gpuAmountTrianglesToCheck[0], 1);
+    }
+}
+
+[numthreads(128,1,1)]
+void DiscoverMesh (uint3 id : SV_DispatchThreadID)
+{
+    if(id.x >= (uint)amountTrianglesToCheck)
+    {
+        return;
+    }
+
+    int triangleIndex = gpuTrianglesShouldCheck[id.x];
+    uint index1 = gpuIndices.Load(triangleIndex * 3 * indexStride);
+    uint index2 = gpuIndices.Load((triangleIndex * 3 + 1) * indexStride);
+    uint index3 = gpuIndices.Load((triangleIndex * 3 + 2) * indexStride);
+
+    int adjacentTrianlge1 = gpuAdjacentTriangleRead[triangleIndex].tri1TriangleIndex;
+    int adjacentTrianlge2 = gpuAdjacentTriangleRead[triangleIndex].tri2TriangleIndex;
+    int adjacentTrianlge3 = gpuAdjacentTriangleRead[triangleIndex].tri3TriangleIndex;
+
+    if(reverseDirection)
+    {
+        gpuAdjacentTrianglesIndex[triangleIndex] = 1;
+    }
+    else
+    {
+        gpuAdjacentTrianglesIndex[triangleIndex] = -1;
+    }
+    
+    output[index1] = 1.8;
+    output[index2] = 1.8;
+    output[index3] = 1.8;
+
+    if(adjacentTrianlge1 >= 0)
+    {
+        CheckAdjacentTriangleShouldDiscover(adjacentTrianlge1);
+    }
+    if(adjacentTrianlge2 >= 0)
+    {
+        CheckAdjacentTriangleShouldDiscover(adjacentTrianlge2);
+    }
+    if(adjacentTrianlge3 >= 0)
+    {
+        CheckAdjacentTriangleShouldDiscover(adjacentTrianlge3);
+    }
+}
+
+[numthreads(128,1,1)]
+void DecayMesh (uint3 id : SV_DispatchThreadID)
+{
+    if(id.x > (uint)amountVerts)
+    {
+        return;
+    }
+    float uvx =  output[id.x];
+
+    if(uvx >= 1)
+    {
+        uvx -= 0.1;
+        output[id.x] = uvx;
+    }
+    else if(uvx > 0)
+    {
+        uvx -= decaySpeed;
+        uvx = uvx < 0 ? 0 : uvx;
+        output[id.x] = uvx;
+    }
+}
